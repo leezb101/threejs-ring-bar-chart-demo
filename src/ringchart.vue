@@ -1,15 +1,14 @@
 <template>
   <div ref="threeRef">
-    <div class="legend">
-      <div v-for="(item, i) in ringData" class="legend-item">
-        <span></span>
-      </div>
+    <div class="tooltip" :style="{ left: `${tooltipX + 10}px`, top: `${tooltipY + 10}px` }" v-show="showTooltip">
+      <div><span :style="{ background: colors[tooltipCurrentIndex] }"></span>{{
+        ringData[tooltipCurrentIndex].label }}:{{ ringData[tooltipCurrentIndex].value }}</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { Scene, PerspectiveCamera, WebGLRenderer, BoxGeometry, MeshBasicMaterial, Mesh, AmbientLight, MeshNormalMaterial, Object3D, AxesHelper, Vector3, BufferGeometry, Float32BufferAttribute, Shape, ExtrudeGeometryOptions, ExtrudeGeometry, MeshPhongMaterial, Group, PointLight, MeshLambertMaterial, DoubleSide, Raycaster, Vector2, Color, Material } from 'three'
 import * as SceneUtils from 'three/examples/jsm/utils/SceneUtils'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
@@ -18,9 +17,15 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass'
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass'
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader'
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry'
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
 
 
 const threeRef = ref<HTMLDivElement>()
+const tooltipX = ref<number>(0)
+const tooltipY = ref<number>(0)
+const showTooltip = ref<boolean>(false)
+const tooltipCurrentIndex = ref<number>(0)
 
 const scene = new Scene()
 const renderer = new WebGLRenderer({ antialias: true })
@@ -28,7 +33,14 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setClearColor(0x121927)
 const camera = new PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000)
 
-const ringData = [10, 30, 20, 25, 15]
+const ringData = [
+  { label: '公司1', value: 10 },
+  { label: '公司2', value: 30 },
+  { label: '公司3', value: 20 },
+  { label: '公司4', value: 25 },
+  { label: '公司5', value: 15 }
+]
+
 const ringsRef = ref<Object3D[]>([])
 
 const colors = ['#5B8FF9', '#E5679A', '#44D7B6', '#F7B500', '#8F84E0', '#FF8362', '#6FD8D6', '#E55050']
@@ -107,23 +119,23 @@ function init() {
 function addRingPart() {
   const innerR = 5
   const outR = 8
-  const total = ringData.reduce((pre, cur) => cur + pre, 0)
+  const total = ringData.reduce((pre, cur) => cur.value + pre, 0)
   const group = new Group()
 
   let deltaRotate = 0
 
-  const sortedRingData = ringData.sort((a, b) => a - b)
+  const sortedRingData = ringData.sort((a, b) => a.value - b.value)
 
   for (let i = 0; i < sortedRingData.length; i++) {
     const partShape = new Shape()
-    const percent = sortedRingData[i] / total
+    const percent = sortedRingData[i].value / total
     partShape.moveTo(innerR, 0)
     partShape.absarc(0, 0, innerR, 0, percent * 2 * Math.PI, false)
     partShape.lineTo(outR * Math.cos(percent * 2 * Math.PI), outR * Math.sin(percent * 2 * Math.PI))
     partShape.absarc(0, 0, outR, percent * 2 * Math.PI, 0, true)
     partShape.lineTo(innerR, 0)
     const extrudeOptions: ExtrudeGeometryOptions = {
-      depth: 10 * (sortedRingData[i] / total),
+      depth: 10 * (sortedRingData[i].value / total),
       curveSegments: 30,
       steps: 4,
       bevelEnabled: false,
@@ -146,7 +158,7 @@ function addRingPart() {
     const mesh = new Mesh(partGeo, material)
     mesh.name = `ring-${i}`
     mesh.rotation.z = Math.PI * 2 * deltaRotate
-    deltaRotate += sortedRingData[i] / total
+    deltaRotate += sortedRingData[i].value / total
     ringsRef.value.push(mesh)
     group.add(mesh)
   }
@@ -182,10 +194,10 @@ function addGround() {
 const onMouseMove = (event: MouseEvent) => {
   mousePoint.x = (event.clientX / window.innerWidth) * 2 - 1
   mousePoint.y = -(event.clientY / window.innerHeight) * 2 + 1
-  checkIntersection()
+  checkIntersection(event)
 }
 
-function checkIntersection() {
+function checkIntersection(event: MouseEvent) {
   raycaster.setFromCamera(mousePoint, camera)
   const intersects = raycaster.intersectObjects(scene.children, true)
   if (intersects.length) {
@@ -196,18 +208,28 @@ function checkIntersection() {
       if (intersects[0].object.name === 'ground') return
       INTERSECTED = intersects[0].object
       const idx = Number((INTERSECTED.name as string).split('-')[1])
-      debugger
       highlightMesh(idx)
+      showTips(idx, event)
       addSelection(intersects[0].object)
       outlinePass.selectedObjects = selectedObjects
     }
   } else {
+    showTooltip.value = false
     if (INTERSECTED) INTERSECTED.material.emissive.setHex(INTERSECTED.currentHex)
     INTERSECTED = null
     addSelection(null)
     outlinePass.selectedObjects = []
   }
 
+}
+
+function showTips(idx: number, event: MouseEvent) {
+  let px = renderer.domElement.getBoundingClientRect().left;
+  let py = renderer.domElement.getBoundingClientRect().top;
+  showTooltip.value = true
+  tooltipCurrentIndex.value = idx
+  tooltipX.value = event.clientX - px
+  tooltipY.value = event.clientY - py
 }
 
 function highlightMesh(idx: number) {
@@ -239,7 +261,6 @@ function highlightMesh(idx: number) {
     }
   })
 
-
   // const material = new MeshPhongMaterial({
   //   color: 0xffffff * Math.random(),
   //   opacity: 1,
@@ -257,11 +278,59 @@ function addSelection(obj: Object3D | Mesh | null) {
   }
 }
 
+const drawText = (label: string, value: number | string, i: number): void => {
+  const loader = new FontLoader()
+  const path = new URL('./assets/YEFONTYanShanTinXinKai_Regular.json', import.meta.url).href
+  loader.load(path, (loadedFont) => {
+    const textGeo = new TextGeometry(`${label}: ${value}`, {
+      font: loadedFont,
+      size: 2,
+      height: 1
+    })
+
+    const material = new MeshPhongMaterial({
+      color: colors[i],
+      opacity: 1,
+      transparent: true,
+      shininess: 1,
+      side: DoubleSide,
+      emissive: 'white',
+      emissiveIntensity: .2
+    })
+
+    const mesh = new Mesh(textGeo, material)
+    // const mesh = SceneUtils.createMultiMaterialObject(textGeo, [material, wireframeMat])
+    mesh.position.x = -30
+    scene.add(mesh)
+  })
+}
+
 onMounted(() => {
   init()
 })
 
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+.tooltip {
+  position: absolute;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  transition: all 0.3s;
+
+  div {
+    display: flex;
+    align-items: center;
+    color: #fff;
+
+    span {
+      border-radius: 50%;
+      margin-right: 5px;
+      width: 10px;
+      height: 10px;
+    }
+
+  }
+}
 </style>
