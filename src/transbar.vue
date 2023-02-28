@@ -54,6 +54,7 @@ function init() {
     sy += 0.01
     console.log(sy, py)
   }
+
   function renderScene() {
     syAdd()
     barsRef.value.map((bar, index) => {

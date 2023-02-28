@@ -22,6 +22,7 @@ import BarChart from './BarChart.vue';
 import transbar from './transbar.vue';
 import ringchart from './ringchart.vue';
 import RingChartComp3D from './RingChartComp3D.vue';
+import BarChart3DComp from './BarChart3DComp.vue';
 
 const ringData = [
   { label: '公司1', value: 10 },
@@ -57,7 +58,9 @@ const ringData = [
     <div class="grid-3">
       <RingChartComp3D :datas="ringData" />
     </div>
-    <div class="grid-4"></div>
+    <div class="grid-4">
+      <BarChart3DComp :datas="ringData" />
+    </div>
   </div>
 </template>
 
@@ -88,13 +91,16 @@ const ringData = [
 .grid-1 {
   background-color: cyan;
 }
+
 .grid-2 {
   background: yellowgreen;
 }
+
 .grid-3 {
   background-color: pink;
   padding: 12px;
 }
+
 .grid-4 {
   background: orange;
 }

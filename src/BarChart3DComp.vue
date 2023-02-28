@@ -1,10 +1,10 @@
 <template>
-  <div :style="{ width: '100%', height: '100%' }" ref="chartRef">
-    <div class="tooltip" :style="{
+  <div class="barchart-container" ref="barChartRef">
+    <div class="bar-tooltip" :style="{
       left: `${tooltipX + 10}px`,
       top: `${tooltipY}px`,
     }" v-show="showTooltip">
-      <span :style="{ background: ringColors[tooltipCurrentIndex] }"></span>{{ datas[tooltipCurrentIndex].label }}:{{
+      <span :style="{ background: barColors[tooltipCurrentIndex] }"></span>{{ datas[tooltipCurrentIndex].label }}:{{
         datas[tooltipCurrentIndex].value
       }}
     </div>
@@ -17,36 +17,32 @@ import {
   Scene,
   PerspectiveCamera,
   WebGLRenderer,
+  BoxGeometry,
+  MeshPhongMaterial,
+  AmbientLight,
   Raycaster,
   Vector2,
-  AxesHelper,
-  AmbientLight,
-  PointLight,
   Color,
-  Group,
-  Shape,
-  ExtrudeGeometryOptions,
-  ExtrudeGeometry,
-  MeshPhongMaterial,
-  DoubleSide,
+  PointLight,
   Mesh,
+  DoubleSide,
+  Vector3,
+  PlaneGeometry,
   Object3D,
-  MaterialLoader,
 } from 'three';
-import * as SceneUtils from 'three/examples/jsm/utils/SceneUtils';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader';
-import basic5DatVue from './basic5Dat.vue';
 
-const chartRef = ref<HTMLDivElement>();
+const barChartRef = ref<HTMLDivElement>();
 const tooltipX = ref<number>(0);
 const tooltipY = ref<number>(0);
 const showTooltip = ref<boolean>(false);
 const tooltipCurrentIndex = ref<number>(0);
+
 
 // 初始化scene
 const scene = new Scene();
@@ -69,8 +65,9 @@ const props = defineProps<{
   colors?: string[] | undefined;
   highlightColors?: string[] | undefined;
 }>();
+const DATA_SCALE_FACTOR = 100 // 用来将所有数据换算为100为最大值的百分比
 
-const ringsRef = ref<Mesh[]>([]);
+const barsRef = ref<Mesh[]>([]);
 
 const defaultColors = [
   '#5B8FF9',
@@ -93,12 +90,12 @@ const defaultHighlightColors = [
   '#FF6E6E',
 ];
 
-const ringColors = computed(() => {
+const barColors = computed(() => {
   if (props.colors) return props.colors;
   return defaultColors;
 });
 
-const ringHighlightColos = computed(() => {
+const barHighlightColors = computed(() => {
   if (props.highlightColors) return props.highlightColors;
   return defaultHighlightColors;
 });
@@ -112,19 +109,22 @@ const mousePoint = new Vector2(); // 鼠标所在xy平面坐标
 let composer: EffectComposer, outlinePass: OutlinePass, effectFXAA: ShaderPass;
 let selectedObjects = [] as unknown[];
 
+
 const init = () => {
-  if (!chartRef.value) return;
-  // dom渲染后初始化size和aspect
-  renderer.setSize(chartRef.value.clientWidth, chartRef.value.clientHeight);
-  camera.aspect = chartRef.value.clientWidth / chartRef.value.clientHeight;
-  camera.position.set(-35, 20, 30);
-  camera.lookAt(scene.position);
-  chartRef.value.append(renderer.domElement);
+  if (!barChartRef.value) return
+  renderer.setSize(barChartRef.value.clientWidth, barChartRef.value.clientHeight);
+  camera.aspect = barChartRef.value.clientWidth / barChartRef.value.clientHeight;
+  camera.position.set(20, 20, 80);
+
+  barChartRef.value.append(renderer.domElement);
 
   // 初始化镜头控制器
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableZoom = false;
   controls.enablePan = false;
+  controls.enableRotate = false
+
+
 
   // 初始化两种光源
   const alight = new AmbientLight(0xffffff, 0.5);
@@ -134,43 +134,99 @@ const init = () => {
   pointLight.position.set(-20, 30, 40);
   scene.add(pointLight);
 
-  addRings();
-  addGround();
+  addBars()
+  addGround()
   constructComposer();
 
-  document.addEventListener('mousemove', onMouseMove);
+  // todo: 增加mousemove事件
+  barChartRef.value.addEventListener('mousemove', onMouseMove)
 
-  // 逐帧动画
-  let sy = 0;
+  let sy = 0
   function syAdd() {
-    if (sy >= 1) {
-      return;
-    }
-    sy += 0.02;
+    if (sy >= 1) return
+    sy += 0.01
   }
-
   function renderScene() {
-    syAdd();
-    ringsRef.value.map((r) => {
-      r.scale.z = sy;
-    });
+    syAdd()
 
-    camera.updateMatrixWorld();
-    requestAnimationFrame(renderScene);
-    composer.render();
+    const total = props.datas.reduce((pre, cur) => cur.value + pre, 0)
+    const scaledDatas = props.datas.map((item, idx) => {
+      const res = item.value / total * DATA_SCALE_FACTOR
+      return {
+        label: item.label,
+        value: res,
+        index: idx
+      }
+    })
+
+    barsRef.value.map((bar, index) => {
+      bar.scale.y = sy
+      bar.position.y = scaledDatas[index].value * sy / 2
+    })
+    camera.lookAt(new Vector3(20, 20, 0));
+    requestAnimationFrame(renderScene)
+    // renderer.render(scene, camera)
+    composer.render()
   }
 
-  renderScene();
-};
+  renderScene()
+}
+
+const addBars = () => {
+
+  const total = props.datas.reduce((pre, cur) => cur.value + pre, 0)
+  const scaledDatas = props.datas.map((item, idx) => {
+    const res = item.value / total * DATA_SCALE_FACTOR
+    return {
+      label: item.label,
+      value: res,
+      index: idx
+    }
+  })
+
+  for (let i = 0; i < props.datas.length; i++) {
+    const geo = new BoxGeometry(2, scaledDatas[i].value, 2)
+    const material = new MeshPhongMaterial({
+      color: barColors.value[i],
+      opacity: 1,
+      transparent: true,
+      shininess: 1,
+      side: DoubleSide,
+      emissive: 'white',
+      emissiveIntensity: 0.2,
+    })
+    const bar = new Mesh(geo, material)
+    bar.position.set(4 + (4 + 2) * i, 0, 1) // bar宽度厚度为4，间距为4，最高不超过100
+    bar.scale.y = 0
+    bar.name = `bar-${scaledDatas[i].index}`
+    scene.add(bar)
+    barsRef.value.push(bar)
+  }
+}
+
+const addGround = () => {
+  const geo = new PlaneGeometry(1000, 4)
+  const material = new MeshPhongMaterial({
+    color: 'gray',
+    emissive: 'white',
+    emissiveIntensity: 0.4,
+    side: DoubleSide,
+  })
+  const ground = new Mesh(geo, material)
+  ground.name = 'ground'
+  ground.rotation.x = -Math.PI / 2
+  ground.position.set(0, 0, 1)
+  scene.add(ground)
+}
 
 const constructComposer = () => {
-  if (!chartRef.value) return;
+  if (!barChartRef.value) return;
   composer = new EffectComposer(renderer);
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
   outlinePass = new OutlinePass(
 
-    new Vector2(chartRef.value.clientWidth, chartRef.value.clientHeight),
+    new Vector2(barChartRef.value.clientWidth, barChartRef.value.clientHeight),
     scene,
     camera
   );
@@ -183,108 +239,18 @@ const constructComposer = () => {
 
   effectFXAA = new ShaderPass(FXAAShader);
   effectFXAA.uniforms['resolution'].value.set(
-    1 / chartRef.value.clientWidth,
-    1 / chartRef.value.clientHeight
+    1 / barChartRef.value.clientWidth,
+    1 / barChartRef.value.clientHeight
   );
   composer.addPass(effectFXAA);
 };
 
-const addRings = () => {
-  const innerR = 8;
-  const outerR = 12;
-  const total = props.datas.reduce((pre, cur) => cur.value + pre, 0);
-  const group = new Group();
-
-  // 定义需要累加的环状块z旋转变量
-  let deltaRotate = 0;
-
-  let copyData = [...props.datas];
-  const sortedRingData = copyData.sort((a, b) => a.value - b.value);
-
-  for (let i = 0; i < sortedRingData.length; i++) {
-    const partShape = new Shape();
-    const percent = sortedRingData[i].value / total;
-    // 绘制环状平面图（x,y）坐标系
-    partShape.moveTo(innerR, 0);
-    partShape.absarc(0, 0, innerR, 0, percent * 2 * Math.PI, false);
-    partShape.lineTo(
-      outerR * Math.cos(percent * 2 * Math.PI),
-      outerR * Math.sin(percent * 2 * Math.PI)
-    );
-    partShape.absarc(0, 0, outerR, percent * 2 * Math.PI, 0, true);
-    partShape.lineTo(innerR, 0);
-
-    // 设置xy坐标系挤出的配置项
-    const extrudeOptions: ExtrudeGeometryOptions = {
-      depth: 14 * (sortedRingData[i].value / total),
-      curveSegments: 30,
-      steps: 5,
-      bevelEnabled: false,
-      bevelSegments: 0,
-      bevelOffset: 0,
-      bevelSize: 0,
-      bevelThickness: 0,
-    };
-    const partGeo = new ExtrudeGeometry(partShape, extrudeOptions);
-    const material = new MeshPhongMaterial({
-      color: ringColors.value[i],
-      opacity: 1,
-      transparent: true,
-      shininess: 1,
-      side: DoubleSide,
-      emissive: 'white',
-      emissiveIntensity: 0.2,
-    });
-
-    const mesh = new Mesh(partGeo, material);
-    mesh.name = `ring-${i}`;
-    mesh.rotation.z = Math.PI * 2 * deltaRotate;
-    deltaRotate += sortedRingData[i].value / total;
-    ringsRef.value.push(mesh);
-    group.add(mesh);
-  }
-  // 将整个环状图从xy坐标平面沿x轴旋转至xz平面
-  group.rotation.x = -Math.PI / 2;
-  scene.add(group);
-};
-
-const addGround = () => {
-  const innerR = 8;
-  const outerR = 12;
-  const arcShape = new Shape();
-  arcShape.moveTo(outerR, 0);
-  arcShape.lineTo(innerR, 0);
-  arcShape.absarc(0, 0, innerR + 2, 0, Math.PI * 2, false);
-  arcShape.absarc(0, 0, outerR + 1, 0, Math.PI * 2, true);
-
-  const extrudeOptions: ExtrudeGeometryOptions = {
-    curveSegments: 40,
-    depth: 0.5,
-    bevelEnabled: false,
-    bevelSegments: 0,
-    steps: 1,
-    bevelSize: 0,
-    bevelThickness: 0,
-  };
-
-  const groundGeo = new ExtrudeGeometry(arcShape, extrudeOptions);
-  const material = new MeshPhongMaterial({
-    color: 0xdde1d2,
-    opacity: 0.6,
-    transparent: true,
-  });
-  const ground = new Mesh(groundGeo, material);
-  ground.name = 'ground';
-  scene.add(ground);
-  ground.rotation.x = -Math.PI / 2;
-};
-
 const onMouseMove = (event: MouseEvent) => {
-  if (!chartRef.value) return;
+  if (!barChartRef.value) return;
   let px = renderer.domElement.getBoundingClientRect().left;
   let py = renderer.domElement.getBoundingClientRect().top;
-  mousePoint.x = ((event.clientX - px) / chartRef.value.clientWidth) * 2 - 1;
-  mousePoint.y = -((event.clientY - py) / chartRef.value.clientHeight) * 2 + 1;
+  mousePoint.x = ((event.clientX - px) / barChartRef.value.clientWidth) * 2 - 1;
+  mousePoint.y = -((event.clientY - py) / barChartRef.value.clientHeight) * 2 + 1;
   checkIntersection(event);
 };
 
@@ -314,10 +280,10 @@ const checkIntersection = (event: MouseEvent) => {
 };
 
 const highlightMesh = (idx: number) => {
-  ringsRef.value.forEach((item, i) => {
-    if (item.name && item.name == `ring-${idx}`) {
+  barsRef.value.forEach((item, i) => {
+    if (item.name && item.name == `bar-${idx}`) {
       const material = new MeshPhongMaterial({
-        color: ringHighlightColos.value[idx],
+        color: barHighlightColors.value[idx],
         opacity: 1,
         transparent: true,
         shininess: 1,
@@ -328,7 +294,7 @@ const highlightMesh = (idx: number) => {
       item.material = material;
     } else {
       const material = new MeshPhongMaterial({
-        color: ringColors.value[i],
+        color: barColors.value[i],
         opacity: 1,
         transparent: true,
         shininess: 1,
@@ -362,28 +328,34 @@ const addSelection = (obj: Object3D | Mesh | null) => {
 };
 
 onMounted(() => {
-  init();
-});
+  init()
+})
+
 </script>
 
 <style scoped lang="scss">
-.tooltip {
-  position: absolute;
-  padding: 10px;
-  background: rgba(230, 300, 300, 0.6);
-  border-radius: 4px;
-  transition: all 0.3s;
+.barchart-container {
+  height: 100%;
+  width: 100%;
 
-  div {
-    display: flex;
-    align-items: center;
-    color: #fff;
+  .bar-tooltip {
+    position: absolute;
+    padding: 10px;
+    background: rgba(230, 300, 300, 0.6);
+    border-radius: 4px;
+    transition: all 0.3s;
 
-    span {
-      border-radius: 50%;
-      margin-right: 5px;
-      width: 10px;
-      height: 10px;
+    div {
+      display: flex;
+      align-items: center;
+      color: #fff;
+
+      span {
+        border-radius: 50%;
+        margin-right: 5px;
+        width: 10px;
+        height: 10px;
+      }
     }
   }
 }
