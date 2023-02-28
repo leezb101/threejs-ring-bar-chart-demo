@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
+import HelloWorld from './components/HelloWorld.vue';
 import Sample from './Sample.vue';
 import SampleB from './SampleB.vue';
 import BarChart from './BarChart.vue';
@@ -21,9 +21,19 @@ import BarChart from './BarChart.vue';
 // import basic20trans from './basic20trans.vue';
 import transbar from './transbar.vue';
 import ringchart from './ringchart.vue';
+import RingChartComp3D from './RingChartComp3D.vue';
+
+const ringData = [
+  { label: '公司1', value: 10 },
+  { label: '公司2', value: 30 },
+  { label: '公司3', value: 20 },
+  { label: '公司4', value: 25 },
+  { label: '公司5', value: 15 },
+];
 </script>
 
-<template><!-- <Sample /> -->
+<template>
+  <!-- <Sample /> -->
   <!-- <SampleB /> -->
   <!-- <basic3 /> -->
   <!-- <basic5Dat /> -->
@@ -40,7 +50,15 @@ import ringchart from './ringchart.vue';
   <!-- <Basic19trex /> -->
   <!-- <basic20trans /> -->
   <!-- <transbar /> -->
-  <ringchart />
+  <!-- <ringchart /> -->
+  <div class="container">
+    <div class="grid-1"></div>
+    <div class="grid-2"></div>
+    <div class="grid-3">
+      <RingChartComp3D :datas="ringData" />
+    </div>
+    <div class="grid-4"></div>
+  </div>
 </template>
 
 <style scoped>
@@ -57,5 +75,27 @@ import ringchart from './ringchart.vue';
 
 .logo.vue:hover {
   filter: drop-shadow(0 0 2em #42b883aa);
+}
+
+.container {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: repeat(2, 49%);
+  grid-template-rows: repeat(2, 49%);
+  grid-gap: 1%;
+}
+
+.grid-1 {
+  background-color: cyan;
+}
+.grid-2 {
+  background: yellowgreen;
+}
+.grid-3 {
+  background-color: pink;
+  padding: 12px;
+}
+.grid-4 {
+  background: orange;
 }
 </style>

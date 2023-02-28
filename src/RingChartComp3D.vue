@@ -1,16 +1,17 @@
 <template>
-  <div ref="threeRef">
+  <div :style="{ width: '100%', height: '100%' }" ref="chartRef">
     <div
       class="tooltip"
-      :style="{ left: `${tooltipX + 10}px`, top: `${tooltipY + 10}px` }"
+      :style="{
+        left: `${tooltipX + 10}px`,
+        top: `${tooltipY}px`,
+      }"
       v-show="showTooltip"
     >
-      <div>
-        <span :style="{ background: colors[tooltipCurrentIndex] }"></span
-        >{{ ringData[tooltipCurrentIndex].label }}:{{
-          ringData[tooltipCurrentIndex].value
-        }}
-      </div>
+      <span :style="{ background: ringColors[tooltipCurrentIndex] }"></span
+      >{{ datas[tooltipCurrentIndex].label }}:{{
+        datas[tooltipCurrentIndex].value
+      }}
     </div>
   </div>
 </template>
@@ -21,67 +22,62 @@ import {
   Scene,
   PerspectiveCamera,
   WebGLRenderer,
-  BoxGeometry,
-  MeshBasicMaterial,
-  Mesh,
-  AmbientLight,
-  MeshNormalMaterial,
-  Object3D,
+  Raycaster,
+  Vector2,
   AxesHelper,
-  Vector3,
-  BufferGeometry,
-  Float32BufferAttribute,
+  AmbientLight,
+  PointLight,
+  Color,
+  Group,
   Shape,
   ExtrudeGeometryOptions,
   ExtrudeGeometry,
   MeshPhongMaterial,
-  Group,
-  PointLight,
-  MeshLambertMaterial,
   DoubleSide,
-  Raycaster,
-  Vector2,
-  Color,
-  Material,
+  Mesh,
+  Object3D,
+  MaterialLoader,
 } from 'three';
 import * as SceneUtils from 'three/examples/jsm/utils/SceneUtils';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader';
-import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry';
-import { FontLoader } from 'three/examples/jsm/loaders/FontLoader';
+import basic5DatVue from './basic5Dat.vue';
 
-const threeRef = ref<HTMLDivElement>();
+const chartRef = ref<HTMLDivElement>();
 const tooltipX = ref<number>(0);
 const tooltipY = ref<number>(0);
 const showTooltip = ref<boolean>(false);
 const tooltipCurrentIndex = ref<number>(0);
 
+// 初始化scene
 const scene = new Scene();
-const renderer = new WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setClearColor(0x121927);
-const camera = new PerspectiveCamera(
-  45,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  1000
-);
+// 初始化renderer
+const renderer = new WebGLRenderer({
+  antialias: true,
+});
+// renderer.setClearColor(0xffffffff);
+renderer.setClearAlpha(0);
 
-const ringData = [
-  { label: '公司1', value: 10 },
-  { label: '公司2', value: 30 },
-  { label: '公司3', value: 20 },
-  { label: '公司4', value: 25 },
-  { label: '公司5', value: 15 },
-];
+const camera = new PerspectiveCamera(45, 1, 0.1, 1000);
 
-const ringsRef = ref<Object3D[]>([]);
+interface DataItem {
+  label: string;
+  value: number;
+}
 
-const colors = [
+const props = defineProps<{
+  datas: DataItem[];
+  colors?: string[] | undefined;
+  highlightColors?: string[] | undefined;
+}>();
+
+const ringsRef = ref<Mesh[]>([]);
+
+const defaultColors = [
   '#5B8FF9',
   '#E5679A',
   '#44D7B6',
@@ -91,7 +87,7 @@ const colors = [
   '#6FD8D6',
   '#E55050',
 ];
-const highLightcolors = [
+const defaultHighlightColors = [
   '#7EA8FF',
   '#FF96C1',
   '#80E5CE',
@@ -102,109 +98,132 @@ const highLightcolors = [
   '#FF6E6E',
 ];
 
+const ringColors = computed(() => {
+  if (props.colors) return props.colors;
+  return defaultColors;
+});
+
+const ringHighlightColos = computed(() => {
+  if (props.highlightColors) return props.highlightColors;
+  return defaultHighlightColors;
+});
+
+// 通过射线获取鼠标悬停的相关配置
 let INTERSECTED: any;
-const raycaster = new Raycaster();
-const mousePoint = new Vector2();
+const raycaster = new Raycaster(); // 鼠标穿透选择用的垂直z轴的射线
+const mousePoint = new Vector2(); // 鼠标所在xy平面坐标
 
-let composer: EffectComposer,
-  outlinePass: OutlinePass,
-  effectFXAA: ShaderPass,
-  shaderPass: ShaderPass;
-let selectedObjects = [] as any[];
+// 用于处理选中环图高亮部分的配置，效果选择器
+let composer: EffectComposer, outlinePass: OutlinePass, effectFXAA: ShaderPass;
+let selectedObjects = [] as unknown[];
 
-function init() {
+const init = () => {
+  if (!chartRef.value) return;
+  // dom渲染后初始化size和aspect
+  renderer.setSize(chartRef.value.clientWidth, chartRef.value.clientHeight);
+  camera.aspect = chartRef.value.clientWidth / chartRef.value.clientHeight;
   camera.position.set(-35, 20, 30);
   camera.lookAt(scene.position);
-  threeRef.value!.appendChild(renderer.domElement);
+  chartRef.value.append(renderer.domElement);
 
-  const axes = new AxesHelper(20);
-  scene.add(axes);
-
+  // 初始化镜头控制器
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableZoom = false;
   controls.enablePan = false;
 
+  // 初始化两种光源
   const alight = new AmbientLight(0xffffff, 0.5);
   scene.add(alight);
 
-  const plight = new PointLight(0xeeeeee, 0.8);
-  plight.position.set(-20, 30, 40);
-  scene.add(plight);
-
-  addRingPart();
-  addGround();
+  const pointLight = new PointLight(0xeeeeee, 0.8);
+  pointLight.position.set(-20, 30, 40);
+  scene.add(pointLight);
 
   composer = new EffectComposer(renderer);
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
 
-  outlinePass = new OutlinePass(
-    new Vector2(window.innerWidth, window.innerHeight),
-    scene,
-    camera
-  );
-  composer.addPass(outlinePass);
-  outlinePass.visibleEdgeColor = new Color(0xffaa22);
-  outlinePass.edgeStrength = 10; //边缘强度
-  outlinePass.edgeGlow = 0.5; //缓缓接近
-  outlinePass.edgeThickness = 1; //边缘厚度
-  outlinePass.pulsePeriod = 1; //脉冲周期
-
-  effectFXAA = new ShaderPass(FXAAShader);
-  effectFXAA.uniforms['resolution'].value.set(
-    1 / window.innerWidth,
-    1 / window.innerHeight
-  );
-  composer.addPass(effectFXAA);
+  addRings();
+  addGround();
+  constructComposer();
 
   document.addEventListener('mousemove', onMouseMove);
 
+  // 逐帧动画
   let sy = 0;
   function syAdd() {
-    if (sy >= 1) return;
+    if (sy >= 1) {
+      return;
+    }
     sy += 0.02;
   }
 
   function renderScene() {
     syAdd();
-    ringsRef.value.map((r, idx) => {
+    ringsRef.value.map((r) => {
       r.scale.z = sy;
     });
 
     camera.updateMatrixWorld();
     requestAnimationFrame(renderScene);
-    // renderer.render(scene, camera)
     composer.render();
   }
 
   renderScene();
-}
+};
 
-function addRingPart() {
-  const innerR = 5;
-  const outR = 8;
-  const total = ringData.reduce((pre, cur) => cur.value + pre, 0);
+const constructComposer = () => {
+  if (!chartRef.value) return;
+  outlinePass = new OutlinePass(
+    new Vector2(chartRef.value.clientWidth, chartRef.value.clientHeight),
+    scene,
+    camera
+  );
+  outlinePass.visibleEdgeColor = new Color(0xffaa22);
+  outlinePass.edgeStrength = 10;
+  outlinePass.edgeGlow = 0.5;
+  outlinePass.edgeThickness = 1;
+  outlinePass.pulsePeriod = 1;
+  composer.addPass(outlinePass);
+
+  effectFXAA = new ShaderPass(FXAAShader);
+  effectFXAA.uniforms['resolution'].value.set(
+    1 / chartRef.value.clientWidth,
+    1 / chartRef.value.clientHeight
+  );
+  composer.addPass(effectFXAA);
+};
+
+const addRings = () => {
+  const innerR = 8;
+  const outerR = 12;
+  const total = props.datas.reduce((pre, cur) => cur.value + pre, 0);
   const group = new Group();
 
+  // 定义需要累加的环状块z旋转变量
   let deltaRotate = 0;
 
-  const sortedRingData = ringData.sort((a, b) => a.value - b.value);
+  let copyData = [...props.datas];
+  const sortedRingData = copyData.sort((a, b) => a.value - b.value);
 
   for (let i = 0; i < sortedRingData.length; i++) {
     const partShape = new Shape();
     const percent = sortedRingData[i].value / total;
+    // 绘制环状平面图（x,y）坐标系
     partShape.moveTo(innerR, 0);
     partShape.absarc(0, 0, innerR, 0, percent * 2 * Math.PI, false);
     partShape.lineTo(
-      outR * Math.cos(percent * 2 * Math.PI),
-      outR * Math.sin(percent * 2 * Math.PI)
+      outerR * Math.cos(percent * 2 * Math.PI),
+      outerR * Math.sin(percent * 2 * Math.PI)
     );
-    partShape.absarc(0, 0, outR, percent * 2 * Math.PI, 0, true);
+    partShape.absarc(0, 0, outerR, percent * 2 * Math.PI, 0, true);
     partShape.lineTo(innerR, 0);
+
+    // 设置xy坐标系挤出的配置项
     const extrudeOptions: ExtrudeGeometryOptions = {
-      depth: 10 * (sortedRingData[i].value / total),
+      depth: 14 * (sortedRingData[i].value / total),
       curveSegments: 30,
-      steps: 4,
+      steps: 5,
       bevelEnabled: false,
       bevelSegments: 0,
       bevelOffset: 0,
@@ -213,7 +232,7 @@ function addRingPart() {
     };
     const partGeo = new ExtrudeGeometry(partShape, extrudeOptions);
     const material = new MeshPhongMaterial({
-      color: colors[i],
+      color: ringColors.value[i],
       opacity: 1,
       transparent: true,
       shininess: 1,
@@ -229,19 +248,19 @@ function addRingPart() {
     ringsRef.value.push(mesh);
     group.add(mesh);
   }
-
+  // 将整个环状图从xy坐标平面沿x轴旋转至xz平面
   group.rotation.x = -Math.PI / 2;
   scene.add(group);
-}
+};
 
-function addGround() {
-  const innerR = 5;
-  const outR = 8;
+const addGround = () => {
+  const innerR = 8;
+  const outerR = 12;
   const arcShape = new Shape();
-  arcShape.moveTo(outR, 0);
+  arcShape.moveTo(outerR, 0);
   arcShape.lineTo(innerR, 0);
   arcShape.absarc(0, 0, innerR + 2, 0, Math.PI * 2, false);
-  arcShape.absarc(0, 0, outR + 1, 0, Math.PI * 2, true);
+  arcShape.absarc(0, 0, outerR + 1, 0, Math.PI * 2, true);
 
   const extrudeOptions: ExtrudeGeometryOptions = {
     curveSegments: 40,
@@ -252,6 +271,7 @@ function addGround() {
     bevelSize: 0,
     bevelThickness: 0,
   };
+
   const groundGeo = new ExtrudeGeometry(arcShape, extrudeOptions);
   const material = new MeshPhongMaterial({
     color: 0xdde1d2,
@@ -262,15 +282,18 @@ function addGround() {
   ground.name = 'ground';
   scene.add(ground);
   ground.rotation.x = -Math.PI / 2;
-}
+};
 
 const onMouseMove = (event: MouseEvent) => {
-  mousePoint.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mousePoint.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  if (!chartRef.value) return;
+  let px = renderer.domElement.getBoundingClientRect().left;
+  let py = renderer.domElement.getBoundingClientRect().top;
+  mousePoint.x = ((event.clientX - px) / chartRef.value.clientWidth) * 2 - 1;
+  mousePoint.y = -((event.clientY - py) / chartRef.value.clientHeight) * 2 + 1;
   checkIntersection(event);
 };
 
-function checkIntersection(event: MouseEvent) {
+const checkIntersection = (event: MouseEvent) => {
   raycaster.setFromCamera(mousePoint, camera);
   const intersects = raycaster.intersectObjects(scene.children, true);
   if (intersects.length) {
@@ -278,43 +301,28 @@ function checkIntersection(event: MouseEvent) {
       INTERSECTED != intersects[0].object &&
       intersects[0].object instanceof Mesh
     ) {
-      if (INTERSECTED) {
-        INTERSECTED.material.emissive.setHex(INTERSECTED.currentHex);
-      }
+      // 跳过底座的选中效果
       if (intersects[0].object.name === 'ground') return;
       INTERSECTED = intersects[0].object;
       const idx = Number((INTERSECTED.name as string).split('-')[1]);
       highlightMesh(idx);
       showTips(idx, event);
       addSelection(intersects[0].object);
-      outlinePass.selectedObjects = selectedObjects;
+      outlinePass.selectedObjects = selectedObjects as any[];
     }
   } else {
     showTooltip.value = false;
-    if (INTERSECTED)
-      INTERSECTED.material.emissive.setHex(INTERSECTED.currentHex);
     INTERSECTED = null;
     addSelection(null);
     outlinePass.selectedObjects = [];
   }
-}
+};
 
-function showTips(idx: number, event: MouseEvent) {
-  let px = renderer.domElement.getBoundingClientRect().left;
-  let py = renderer.domElement.getBoundingClientRect().top;
-  showTooltip.value = true;
-  tooltipCurrentIndex.value = idx;
-  tooltipX.value = event.clientX - px;
-  tooltipY.value = event.clientY - py;
-}
-
-function highlightMesh(idx: number) {
-  // obj.currentHex = obj.material.emissive.getHex()
-  // obj.material.emissive.setHex(0x999999)
+const highlightMesh = (idx: number) => {
   ringsRef.value.forEach((item, i) => {
     if (item.name && item.name == `ring-${idx}`) {
       const material = new MeshPhongMaterial({
-        color: highLightcolors[idx],
+        color: ringHighlightColos.value[idx],
         opacity: 1,
         transparent: true,
         shininess: 1,
@@ -325,7 +333,7 @@ function highlightMesh(idx: number) {
       item.material = material;
     } else {
       const material = new MeshPhongMaterial({
-        color: colors[i],
+        color: ringColors.value[i],
         opacity: 1,
         transparent: true,
         shininess: 1,
@@ -336,52 +344,26 @@ function highlightMesh(idx: number) {
       item.material = material;
     }
   });
+};
 
-  // const material = new MeshPhongMaterial({
-  //   color: 0xffffff * Math.random(),
-  //   opacity: 1,
-  //   transparent: true
-  // })
-  // obj.material = material
-}
+const showTips = (idx: number, event: MouseEvent) => {
+  // let px = renderer.domElement.getBoundingClientRect().left;
+  // let py = renderer.domElement.getBoundingClientRect().top;
+  // console.log(px, py);
+  // console.log(event);
+  showTooltip.value = true;
+  tooltipCurrentIndex.value = idx;
+  tooltipX.value = event.clientX;
+  tooltipY.value = event.clientY;
+};
 
-function addSelection(obj: Object3D | Mesh | null) {
+const addSelection = (obj: Object3D | Mesh | null) => {
   if (obj) {
     selectedObjects = [];
     selectedObjects.push(obj);
   } else {
     selectedObjects = [];
   }
-}
-
-const drawText = (label: string, value: number | string, i: number): void => {
-  const loader = new FontLoader();
-  const path = new URL(
-    './assets/YEFONTYanShanTinXinKai_Regular.json',
-    import.meta.url
-  ).href;
-  loader.load(path, (loadedFont) => {
-    const textGeo = new TextGeometry(`${label}: ${value}`, {
-      font: loadedFont,
-      size: 2,
-      height: 1,
-    });
-
-    const material = new MeshPhongMaterial({
-      color: colors[i],
-      opacity: 1,
-      transparent: true,
-      shininess: 1,
-      side: DoubleSide,
-      emissive: 'white',
-      emissiveIntensity: 0.2,
-    });
-
-    const mesh = new Mesh(textGeo, material);
-    // const mesh = SceneUtils.createMultiMaterialObject(textGeo, [material, wireframeMat])
-    mesh.position.x = -30;
-    scene.add(mesh);
-  });
 };
 
 onMounted(() => {
@@ -393,7 +375,7 @@ onMounted(() => {
 .tooltip {
   position: absolute;
   padding: 10px;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(230, 300, 300, 0.6);
   border-radius: 4px;
   transition: all 0.3s;
 
